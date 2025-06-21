@@ -32,6 +32,7 @@ const CustomerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchCategory, setSearchCategory] = useState('');
+  const [searchPincode, setSearchPincode] = useState('');
   const [openOrderDialog, setOpenOrderDialog] = useState(false);
   const [selectedTiffin, setSelectedTiffin] = useState(null);
   const [orderQuantity, setOrderQuantity] = useState(1);
@@ -43,6 +44,7 @@ const CustomerDashboard = () => {
   const { addNotification, notifications, clearNotifications } = useNotifications();
   const [orderHistoryPage, setOrderHistoryPage] = useState(1);
   const pageSize = 10;
+  const [searchStatus, setSearchStatus] = useState('');
 
   const orderHistoryAll = orders
     .filter(order => ['delivered', 'cancelled', 'ready_for_delivery', 'picked_up'].includes(order.status))
@@ -120,6 +122,7 @@ const CustomerDashboard = () => {
       });
       const pincode = response.data.pincode;
       setUserPincode(pincode);
+      setSearchStatus(`Showing all tiffins in your area (${pincode})`);
       console.log('Customer user pincode fetched:', pincode); // Debug log
       fetchTiffins(pincode);
     } catch (error) {
@@ -157,10 +160,21 @@ const CustomerDashboard = () => {
     setLoading(true);
     setError(null);
     try {
-      const params = {
-        pincode: pincode || userPincode,
-        search: category,
-      };
+      const params = {};
+      
+      // Only add pincode parameter if it's provided and different from user's pincode
+      if (pincode && pincode !== userPincode) {
+        params.pincode = pincode;
+      } else if (pincode) {
+        // If pincode is same as user's pincode, still add it to ensure we get results
+        params.pincode = pincode;
+      }
+      
+      // Only add search parameter if category is provided
+      if (category && category.trim()) {
+        params.search = category.trim();
+      }
+      
       console.log('Fetching tiffins with params:', params); // Debug log
       const response = await axios.get(`${API_URL}/tiffins/`, {
         params: params,
@@ -177,7 +191,43 @@ const CustomerDashboard = () => {
   };
 
   const handleSearch = () => {
-    fetchTiffins(userPincode, searchCategory);
+    const searchCategoryValue = searchCategory.trim();
+    const searchPincodeValue = searchPincode.trim();
+    
+    // If both fields are empty, show tiffins in user's area
+    if (!searchCategoryValue && !searchPincodeValue) {
+      setSearchStatus(`Showing all tiffins in your area (${userPincode})`);
+      fetchTiffins(userPincode, '');
+      return;
+    }
+    
+    // If only pincode is provided, search by pincode only
+    if (!searchCategoryValue && searchPincodeValue) {
+      setSearchStatus(`Showing all tiffins in pincode ${searchPincodeValue}`);
+      fetchTiffins(searchPincodeValue, '');
+      return;
+    }
+    
+    // If only category is provided, search by name/description in user's area
+    if (searchCategoryValue && !searchPincodeValue) {
+      setSearchStatus(`Searching for "${searchCategoryValue}" in your area (${userPincode})`);
+      fetchTiffins(userPincode, searchCategoryValue);
+      return;
+    }
+    
+    // If both are provided, search by both
+    if (searchCategoryValue && searchPincodeValue) {
+      setSearchStatus(`Searching for "${searchCategoryValue}" in pincode ${searchPincodeValue}`);
+      fetchTiffins(searchPincodeValue, searchCategoryValue);
+      return;
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchCategory('');
+    setSearchPincode('');
+    setSearchStatus(`Showing all tiffins in your area (${userPincode})`);
+    fetchTiffins(userPincode, '');
   };
 
   const handleOpenOrderDialog = (tiffin) => {
@@ -269,23 +319,58 @@ const CustomerDashboard = () => {
 
       {tabValue === 0 && (
         <>
-          <Box sx={{ mb: 3, display: 'flex', gap: 2 }}>
-            <TextField
-              label="Search by Tiffin Name or Description"
-              variant="outlined"
-              size="small"
-              value={searchCategory}
-              onChange={(e) => setSearchCategory(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleSearch();
-                }
-              }}
-              sx={{ flexGrow: 1 }}
-            />
-            <Button variant="contained" onClick={handleSearch}>
-              Search
-            </Button>
+          <Box sx={{ mb: 3 }}>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={5}>
+                <TextField
+                  label="Search by Tiffin Name or Description"
+                  variant="outlined"
+                  size="small"
+                  value={searchCategory}
+                  onChange={(e) => setSearchCategory(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  label="Search by Pincode"
+                  variant="outlined"
+                  size="small"
+                  value={searchPincode}
+                  onChange={(e) => setSearchPincode(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
+                  fullWidth
+                  placeholder={userPincode ? `Current: ${userPincode}` : 'Enter pincode'}
+                />
+              </Grid>
+              <Grid item xs={6} sm={2}>
+                <Button variant="contained" onClick={handleSearch} fullWidth>
+                  Search
+                </Button>
+              </Grid>
+              <Grid item xs={6} sm={2}>
+                <Button variant="outlined" onClick={handleClearSearch} fullWidth>
+                  Clear
+                </Button>
+              </Grid>
+            </Grid>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              💡 Search by tiffin name/description OR pincode OR both. Leave pincode empty to search in your area ({userPincode || 'Loading...'}). Leave name empty to see all tiffins in a specific pincode.
+            </Typography>
+            {searchStatus && (
+              <Typography variant="body2" color="primary" sx={{ mt: 1, display: 'block', fontWeight: 'medium' }}>
+                🔍 {searchStatus}
+              </Typography>
+            )}
           </Box>
 
           <Grid container spacing={3}>

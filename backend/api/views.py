@@ -58,25 +58,9 @@ class DeliveryBoyViewSet(viewsets.ModelViewSet):
             return DeliveryBoy.objects.filter(user=self.request.user)
         return DeliveryBoy.objects.all()
 
-class TiffinFilter(filters.FilterSet):
-    min_price = filters.NumberFilter(field_name="price", lookup_expr='gte')
-    max_price = filters.NumberFilter(field_name="price", lookup_expr='lte')
-    pincode = filters.CharFilter(field_name="owner__business_pincode")
-    search = filters.CharFilter(method='filter_by_name_or_description')
-
-    class Meta:
-        model = Tiffin
-        fields = ['is_available', 'owner', 'pincode', 'min_price', 'max_price']
-
-    def filter_by_name_or_description(self, queryset, name, value):
-        return queryset.filter(
-            models.Q(name__icontains=value) | models.Q(description__icontains=value)
-        )
-
 class TiffinViewSet(viewsets.ModelViewSet):
     queryset = Tiffin.objects.all()
     serializer_class = TiffinSerializer
-    filterset_class = TiffinFilter
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
@@ -87,23 +71,26 @@ class TiffinViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = Tiffin.objects.all()
 
-        if user.is_authenticated:
-            if user.user_type == 'owner':
-                # Owners only see their own tiffins.
-                # No need for other filters like pincode or search for them.
-                print(f"Filtering tiffins for owner: {user.username}")  # Debug log
-                return queryset.filter(owner__user=user)
+        if user.is_authenticated and user.user_type == 'owner':
+            # Owners only see their own tiffins.
+            print(f"Filtering tiffins for owner: {user.username}")  # Debug log
+            return queryset.filter(owner__user=user)
 
-        # For anonymous users, customers, and delivery boys,
-        # filters (pincode and search) will be applied by the filterset_class
-        # based on the query parameters sent from the frontend.
-        # We also want to ensure only available tiffins are shown.
-        if not user.is_authenticated or (user.is_authenticated and user.user_type != 'owner'):
-            queryset = queryset.filter(is_available=True)
+        # For anonymous users or non-owners, always filter by availability
+        queryset = queryset.filter(is_available=True)
 
-        # The filterset_class will automatically apply filters based on
-        # query parameters like 'pincode' and 'search'.
-        # So we just return the base queryset (potentially filtered by is_available).
+        # Apply pincode filter if provided
+        pincode = self.request.query_params.get('pincode', None)
+        if pincode:
+            queryset = queryset.filter(owner__business_pincode=pincode)
+
+        # Apply search filter if provided
+        search_term = self.request.query_params.get('search', None)
+        if search_term:
+            queryset = queryset.filter(
+                models.Q(name__icontains=search_term) | models.Q(description__icontains=search_term)
+            )
+
         return queryset
 
     def perform_create(self, serializer):

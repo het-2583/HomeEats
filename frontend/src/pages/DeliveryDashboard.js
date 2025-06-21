@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container,
   Typography,
@@ -22,6 +22,7 @@ import {
 import axios from 'axios';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
+import { useNotifications } from '../contexts/NotificationContext';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
@@ -99,6 +100,8 @@ const DeliveryDashboard = () => {
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { addNotification, notifications, clearNotifications } = useNotifications();
+  const seenDeliveryIds = useRef(new Set());
 
   const user = useSelector((state) => state.auth.user);
 
@@ -116,16 +119,33 @@ const DeliveryDashboard = () => {
   const fetchDeliveries = async (pincode) => {
     try {
       const token = localStorage.getItem('access_token');
-      let allDeliveries = [];
-      let nextUrl = `${API_URL}/deliveries/?pincode=${pincode}`;
-      while (nextUrl) {
-        const response = await axios.get(nextUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log('Deliveries API response:', response.data.results); // Debug log
-        allDeliveries = allDeliveries.concat(response.data.results);
-        nextUrl = response.data.next;
+      const deliveryMap = new Map();
+
+      // Fetch unassigned deliveries in the delivery boy's pincode
+      let unassignedUrl = `${API_URL}/deliveries/?pincode=${pincode}&delivery_boy_is_null=true`;
+      while (unassignedUrl) {
+        const response = await axios.get(unassignedUrl, { headers: { Authorization: `Bearer ${token}` } });
+        response.data.results.forEach(d => deliveryMap.set(d.id, d));
+        unassignedUrl = response.data.next;
       }
+
+      // Fetch deliveries already assigned to this delivery boy
+      let assignedUrl = `${API_URL}/deliveries/?delivery_boy=${user.id}`;
+      while (assignedUrl) {
+        const response = await axios.get(assignedUrl, { headers: { Authorization: `Bearer ${token}` } });
+        response.data.results.forEach(d => deliveryMap.set(d.id, d));
+        assignedUrl = response.data.next;
+      }
+      
+      const allDeliveries = Array.from(deliveryMap.values());
+
+      allDeliveries.forEach(delivery => {
+        if (delivery.status === 'pending' && delivery.delivery_boy === null && !seenDeliveryIds.current.has(delivery.id)) {
+          addNotification(`New delivery available for order #${delivery.order_details.id}`);
+          seenDeliveryIds.current.add(delivery.id);
+        }
+      });
+
       setDeliveries(allDeliveries);
     } catch (error) {
       setError('Failed to fetch deliveries');
@@ -221,6 +241,7 @@ const DeliveryDashboard = () => {
           <Tab label="New Deliveries" />
           <Tab label="Active Deliveries" />
           <Tab label="Delivery History" />
+          <Tab label="Notifications" />
         </Tabs>
       </Box>
 
@@ -437,6 +458,25 @@ const DeliveryDashboard = () => {
             ))
           )}
         </Grid>
+      )}
+
+      {tabValue === 3 && (
+        <Box>
+          <Typography variant="h5" gutterBottom>Notifications</Typography>
+          <Button variant="outlined" color="error" onClick={clearNotifications} sx={{ mb: 2 }}>
+            Clear Notifications
+          </Button>
+          {notifications.length === 0 ? (
+            <Typography color="text.secondary">No new notifications.</Typography>
+          ) : (
+            notifications.map((notif) => (
+              <Box key={notif.id} sx={{ mb: 2, p: 2, border: '1px solid #eee', borderRadius: 2, background: notif.read ? '#fafafa' : '#e3f2fd' }}>
+                <div>{notif.message}</div>
+                <div style={{ fontSize: 12, color: '#888' }}>{new Date(notif.timestamp).toLocaleString()}</div>
+              </Box>
+            ))
+          )}
+        </Box>
       )}
     </Container>
   );
